@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GPO Implementation — Windows Server 2022</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Clash+Display:wght@400;500;600;700&family=Figtree:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg:      #f8f4f0;
+      --bg2:     #f0ebe4;
+      --panel:   #ffffff;
+      --border:  #e0d5c8;
+      --accent:  #7F3030;
+      --accent2: #a84040;
+      --accent3: #2d6a4f;
+      --warn:    #b45309;
+      --text:    #1a1008;
+      --muted:   #7a6555;
+      --mono:    'JetBrains Mono', monospace;
+      --sans:    'Figtree', sans-serif;
+      --shadow:  0 2px 16px rgba(127,48,48,0.08);
+      --shadow-lg: 0 8px 40px rgba(127,48,48,0.13);
+    }
+
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content:'';
+      position:fixed; inset:0;
+      background-image: radial-gradient(circle, rgba(127,48,48,0.06) 1px, transparent 1px);
+      background-size: 30px 30px;
+      pointer-events:none; z-index:0;
+    }
+
+    /* ── HERO ── */
+    .hero {
+      position:relative; z-index:1;
+      min-height:100vh;
+      display:flex; flex-direction:column;
+      justify-content:center;
+      padding: 0 8vw;
+      overflow:hidden;
+    }
+
+    .blob { position:absolute; border-radius:50%; filter:blur(80px); opacity:0.15; pointer-events:none; }
+    .blob-1 { width:500px; height:500px; background:var(--accent); top:-100px; right:-100px; }
+    .blob-2 { width:300px; height:300px; background:var(--warn); bottom:60px; left:-60px; }
+
+    .hero-eyebrow {
+      font-family:var(--mono); font-size:11px;
+      letter-spacing:3px; text-transform:uppercase;
+      color:var(--accent); margin-bottom:1.4rem;
+      display:flex; align-items:center; gap:10px;
+      animation: fadeUp 0.5s ease both;
+    }
+
+    .hero-eyebrow::before {
+      content:''; display:inline-block;
+      width:28px; height:2px;
+      background:var(--accent); border-radius:2px;
+    }
+
+    .hero h1 {
+      font-family: 'Clash Display', var(--sans);
+      font-size: clamp(2.4rem, 5.5vw, 5rem);
+      font-weight:700; line-height:1.05;
+      letter-spacing:-2px; color:var(--text);
+      margin-bottom:1.4rem;
+      animation: fadeUp 0.5s ease 0.1s both;
+    }
+
+    .hero h1 em { font-style:normal; color:var(--accent); }
+
+    .hero-desc {
+      font-size:1.05rem; color:var(--muted);
+      max-width:560px; line-height:1.75;
+      margin-bottom:2rem;
+      animation: fadeUp 0.5s ease 0.2s both;
+    }
+
+    .badge-row { display:flex; flex-wrap:wrap; gap:8px; animation:fadeUp 0.5s ease 0.3s both; }
+
+    .badge {
+      font-family:var(--mono); font-size:11px;
+      padding:4px 12px; border-radius:4px;
+      border:1.5px solid; font-weight:500;
+    }
+
+    .badge-red   { color:var(--accent);  border-color:var(--accent);  background:rgba(127,48,48,0.07); }
+    .badge-green { color:var(--accent3); border-color:var(--accent3); background:rgba(45,106,79,0.07); }
+    .badge-amber { color:var(--warn);    border-color:var(--warn);    background:rgba(180,83,9,0.07); }
+
+    /* ── LAYOUT ── */
+    .divider { border:none; border-top:1.5px solid var(--border); margin:0 8vw; }
+    section { position:relative; z-index:1; padding:5.5rem 8vw; }
+    .stripe { background:var(--bg2); position:relative; z-index:1; padding:1px 0; }
+
+    .eyebrow {
+      font-family:var(--mono); font-size:11px;
+      letter-spacing:3px; text-transform:uppercase;
+      color:var(--accent); margin-bottom:0.8rem;
+      display:flex; align-items:center; gap:8px;
+    }
+    .eyebrow::before { content:''; width:16px; height:2px; background:var(--accent); border-radius:2px; }
+
+    h2 {
+      font-family:'Clash Display', var(--sans);
+      font-size:clamp(1.7rem,3vw,2.4rem);
+      font-weight:700; letter-spacing:-1px;
+      color:var(--text); margin-bottom:2.8rem;
+    }
+
+    /* ── TABLE ── */
+    .table-wrap { border:1.5px solid var(--border); border-radius:10px; overflow:hidden; box-shadow:var(--shadow); }
+    .env-table { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:13px; }
+    .env-table tr { border-bottom:1px solid var(--border); }
+    .env-table tr:last-child { border-bottom:none; }
+    .env-table tr:hover td { background:var(--bg2); }
+    .env-table td { padding:13px 20px; background:var(--panel); transition:background 0.15s; }
+    .env-table td:first-child { color:var(--muted); width:220px; border-right:1px solid var(--border); }
+    .env-table td:last-child { color:var(--accent); font-weight:500; }
+
+    /* ── CHECKLIST ── */
+    .checklist {
+      display:grid; grid-template-columns:repeat(auto-fill, minmax(320px,1fr));
+      gap:1px; background:var(--border);
+      border:1.5px solid var(--border); border-radius:10px;
+      overflow:hidden; box-shadow:var(--shadow);
+    }
+    .check-item {
+      background:var(--panel); padding:1.1rem 1.4rem;
+      display:flex; align-items:center; gap:12px;
+      transition:background 0.15s;
+    }
+    .check-item:hover { background:var(--bg2); }
+    .check-icon {
+      width:22px; height:22px; border-radius:50%;
+      background:rgba(45,106,79,0.1); border:1.5px solid var(--accent3);
+      color:var(--accent3); display:flex; align-items:center; justify-content:center;
+      font-size:12px; flex-shrink:0; font-weight:700;
+    }
+    .check-text { font-size:14px; color:var(--text); }
+
+    /* ── GPO CARDS ── */
+    .gpo-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:1.2rem; }
+
+    .gpo-card {
+      background:var(--panel); border:1.5px solid var(--border);
+      border-radius:12px; overflow:hidden;
+      box-shadow:var(--shadow); transition:all 0.25s;
+    }
+    .gpo-card:hover { border-color:var(--accent); transform:translateY(-3px); box-shadow:var(--shadow-lg); }
+
+    .gpo-card-header {
+      padding:12px 18px; border-bottom:1px solid var(--border);
+      background:rgba(127,48,48,0.05);
+      display:flex; align-items:center; gap:10px;
+    }
+    .gpo-num {
+      width:28px; height:28px; border-radius:50%;
+      background:var(--accent); color:#fff;
+      font-family:var(--mono); font-size:12px; font-weight:700;
+      display:flex; align-items:center; justify-content:center;
+      flex-shrink:0;
+    }
+    .gpo-title { font-weight:600; font-size:14px; color:var(--text); }
+    .gpo-body { padding:16px 18px; }
+    .gpo-target { font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:10px; }
+    .gpo-desc { font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:12px; }
+
+    .restriction-list { list-style:none; display:flex; flex-direction:column; gap:6px; }
+    .restriction-list li {
+      font-size:13px; color:var(--text);
+      display:flex; align-items:center; gap:8px;
+    }
+    .r-blocked { color:#c0392b; font-weight:700; }
+    .r-active  { color:var(--accent3); font-weight:700; }
+
+    /* ── CODE ── */
+    .code-block {
+      background:#1a0f0f; border:1.5px solid #3a1a1a;
+      border-radius:8px; overflow:hidden;
+      margin:1rem 0; box-shadow:var(--shadow);
+    }
+    .code-header {
+      background:#2a1212; border-bottom:1px solid #3a1a1a;
+      padding:8px 16px; display:flex;
+      align-items:center; justify-content:space-between;
+    }
+    .code-lang { font-family:var(--mono); font-size:10px; color:#8a5a5a; letter-spacing:1.5px; text-transform:uppercase; }
+    .code-dots { display:flex; gap:6px; }
+    .code-dots span { width:10px; height:10px; border-radius:50%; }
+    .dot-r { background:#ef4444; } .dot-y { background:#f59e0b; } .dot-g { background:#10b981; }
+
+    pre {
+      padding:1.2rem 1.5rem; font-family:var(--mono);
+      font-size:12.5px; line-height:1.85;
+      color:#c4a882; overflow-x:auto;
+    }
+    pre .kw  { color:#e07070; }
+    pre .str { color:#7ecba1; }
+    pre .cm  { color:#5a3a3a; font-style:italic; }
+    pre .var { color:#e0a070; }
+    pre .val { color:#70a0e0; }
+
+    /* ── STEPS ── */
+    .steps { display:flex; flex-direction:column; }
+    .step { display:grid; grid-template-columns:72px 1fr; }
+    .step-left { display:flex; flex-direction:column; align-items:center; padding-top:2px; }
+    .step-num {
+      width:36px; height:36px; border-radius:50%;
+      background:var(--panel); border:2px solid var(--accent);
+      color:var(--accent); font-family:var(--mono);
+      font-size:13px; font-weight:700;
+      display:flex; align-items:center; justify-content:center;
+      box-shadow:var(--shadow); z-index:1;
+    }
+    .step-line { width:2px; flex:1; background:var(--border); margin:8px 0; min-height:30px; }
+    .step-content { padding:0 0 3rem 1.8rem; }
+    .step-title { font-size:1.1rem; font-weight:600; color:var(--text); margin-bottom:0.4rem; }
+    .step-desc { font-size:14px; color:var(--muted); line-height:1.7; margin-bottom:1rem; }
+
+    /* ── RESULT ── */
+    .result-box {
+      background:rgba(45,106,79,0.06); border:1.5px solid rgba(45,106,79,0.25);
+      border-radius:8px; padding:1rem 1.4rem;
+      font-family:var(--mono); font-size:12.5px;
+      color:var(--accent3); line-height:1.9;
+    }
+    .result-label { font-size:10px; letter-spacing:2px; color:var(--accent3); margin-bottom:6px; opacity:0.7; }
+
+    /* ── OU DIAGRAM ── */
+    .ou-diagram {
+      background:var(--panel); border:1.5px solid var(--border);
+      border-radius:10px; padding:2.5rem;
+      box-shadow:var(--shadow);
+      display:flex; gap:1.5rem; flex-wrap:wrap;
+      justify-content:center;
+    }
+    .ou-box {
+      background:var(--bg); border:2px solid var(--border);
+      border-radius:8px; padding:1.2rem 1.5rem;
+      text-align:center; min-width:160px;
+      transition:all 0.2s;
+    }
+    .ou-box:hover { border-color:var(--accent); transform:translateY(-2px); }
+    .ou-box.admin { border-color:var(--accent); }
+    .ou-box.users { border-color:var(--accent2); }
+    .ou-box.ws    { border-color:var(--warn); }
+    .ou-icon { font-size:1.8rem; margin-bottom:6px; }
+    .ou-name { font-weight:700; font-size:13px; margin-bottom:4px; }
+    .ou-member { font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:6px; }
+    .ou-tag {
+      font-family:var(--mono); font-size:10px;
+      padding:2px 8px; border-radius:3px; display:inline-block;
+    }
+    .ou-tag.red    { background:rgba(127,48,48,0.1); color:var(--accent); }
+    .ou-tag.green  { background:rgba(45,106,79,0.1); color:var(--accent3); }
+    .ou-tag.amber  { background:rgba(180,83,9,0.1); color:var(--warn); }
+
+    /* ── ISSUES ── */
+    .issues-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:1rem; }
+    .issue-card { background:var(--panel); border:1.5px solid var(--border); border-radius:10px; overflow:hidden; box-shadow:var(--shadow); }
+    .issue-head { padding:10px 16px; border-bottom:1px solid var(--border); background:rgba(192,57,43,0.05); display:flex; align-items:center; gap:8px; }
+    .issue-dot { width:8px; height:8px; border-radius:50%; background:#c0392b; flex-shrink:0; }
+    .issue-title { font-family:var(--mono); font-size:12px; color:#c0392b; }
+    .issue-body { padding:14px 16px; }
+    .issue-label { font-size:10px; letter-spacing:2px; color:var(--muted); margin-bottom:4px; }
+    .issue-text  { font-size:13px; color:var(--text); line-height:1.6; margin-bottom:10px; }
+    .fix-label   { font-size:10px; letter-spacing:2px; color:var(--accent3); margin-bottom:4px; }
+    .fix-text    { font-size:13px; color:var(--accent3); line-height:1.6; }
+
+    /* ── SKILLS ── */
+    .skills-wrap { display:flex; flex-wrap:wrap; gap:10px; }
+    .skill-pill {
+      background:var(--panel); border:1.5px solid var(--border);
+      border-radius:6px; padding:8px 16px;
+      font-size:13px; font-weight:500; color:var(--text);
+      display:flex; align-items:center; gap:8px;
+      box-shadow:var(--shadow); transition:all 0.15s;
+    }
+    .skill-pill:hover { border-color:var(--accent); transform:translateY(-1px); }
+
+    /* ── FOOTER ── */
+    footer {
+      position:relative; z-index:1;
+      border-top:1.5px solid var(--border);
+      padding:2.5rem 8vw;
+      display:flex; justify-content:space-between;
+      align-items:center; flex-wrap:wrap; gap:1rem;
+      background:var(--panel);
+    }
+    .footer-left { font-family:var(--mono); font-size:12px; color:var(--muted); }
+    .footer-left strong { color:var(--accent); }
+    .footer-links { display:flex; gap:1.5rem; }
+    .footer-links a { font-family:var(--mono); font-size:12px; color:var(--muted); text-decoration:none; transition:color 0.2s; }
+    .footer-links a:hover { color:var(--accent); }
+
+    /* ── ANIM ── */
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(18px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes pulse { 0%,100%{opacity:0.3;} 50%{opacity:1;} }
+
+    .live { display:inline-flex; align-items:center; gap:6px; }
+    .live::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--accent3); animation:pulse 2s ease infinite; }
+
+    @media(max-width:768px) {
+      section { padding:4rem 5vw; }
+      .ou-diagram { flex-direction:column; align-items:center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="hero-eyebrow">Home Lab Project — Part 03</div>
+  <h1>Group Policy Objects<br><em>(GPO) Implementation</em></h1>
+  <p class="hero-desc">
+    Enforcing enterprise-grade security policies, desktop restrictions, software controls,
+    and automated network drive mapping across a Windows Server 2022 Active Directory
+    domain — simulating real-world IT administration.
+  </p>
+  <div class="badge-row">
+    <span class="badge badge-green"><span class="live">Complete</span></span>
+    <span class="badge badge-red">Windows Server 2022</span>
+    <span class="badge badge-red">Active Directory</span>
+    <span class="badge badge-red">GPO</span>
+    <span class="badge badge-amber">mylab.local</span>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- ENVIRONMENT -->
+<section>
+  <div class="eyebrow">Lab Setup</div>
+  <h2>Environment</h2>
+  <div class="table-wrap">
+    <table class="env-table">
+      <tr><td>Domain Controller</td><td>WIN-6ARV79FMB48 — Windows Server 2022</td></tr>
+      <tr><td>Client Machine</td><td>CPC-NSimon-001 — Windows 10 Pro</td></tr>
+      <tr><td>Domain</td><td>mylab.local</td></tr>
+      <tr><td>Server IP</td><td>192.168.1.200</td></tr>
+      <tr><td>Client IP</td><td>192.168.1.10</td></tr>
+      <tr><td>Test User</td><td>nsimon (Neil Marvin Simon)</td></tr>
+      <tr><td>Admin User</td><td>mylab\Administrator</td></tr>
+    </table>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- OBJECTIVES -->
+<section>
+  <div class="eyebrow">Goals</div>
+  <h2>Project Objectives</h2>
+  <div class="checklist">
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Create Organizational Units (VMAdmin, VMUsers, VirtualWorkstation)</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Move users and computers into appropriate OUs</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Configure Fine-Grained Password & Lockout Policy</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Deploy Login Banner GPO domain-wide</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Deploy Desktop Restrictions GPO to VMUsers</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Deploy Software Restrictions GPO to VMUsers</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Create and configure CompanyShare SMB network share</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Map Z: network drive via GPO</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Verify all GPOs applied on Windows 10 client</span></div>
+    <div class="check-item"><div class="check-icon">✓</div><span class="check-text">Document temporary privilege elevation procedures</span></div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- OU STRUCTURE -->
+<div class="stripe">
+<section>
+  <div class="eyebrow">Active Directory</div>
+  <h2>Organizational Unit Structure</h2>
+  <div class="ou-diagram">
+    <div class="ou-box admin">
+      <div class="ou-icon">🛡️</div>
+      <div class="ou-name">VMAdmin</div>
+      <div class="ou-member">Administrator</div>
+      <span class="ou-tag red">No GPO Restrictions</span>
+    </div>
+    <div class="ou-box users">
+      <div class="ou-icon">👤</div>
+      <div class="ou-name">VMUsers</div>
+      <div class="ou-member">nsimon</div>
+      <span class="ou-tag green">All GPOs Applied</span>
+    </div>
+    <div class="ou-box ws">
+      <div class="ou-icon">💻</div>
+      <div class="ou-name">VirtualWorkstation</div>
+      <div class="ou-member">CPC-NSimon-001</div>
+      <span class="ou-tag amber">Computer Object</span>
+    </div>
+  </div>
+
+  <div class="code-block" style="margin-top:2rem;">
+    <div class="code-header"><span class="code-lang">PowerShell — Create & Move OUs</span><div class="code-dots"><span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span></div></div>
+    <pre><span class="cm"># Create OUs</span>
+<span class="var">New-ADOrganizationalUnit</span> -Name <span class="str">"VMAdmin"</span> -Path <span class="str">"DC=mylab,DC=local"</span>
+<span class="var">New-ADOrganizationalUnit</span> -Name <span class="str">"VMUsers"</span> -Path <span class="str">"DC=mylab,DC=local"</span>
+<span class="var">New-ADOrganizationalUnit</span> -Name <span class="str">"VirtualWorkstation"</span> -Path <span class="str">"DC=mylab,DC=local"</span>
+
+<span class="cm"># Move objects to correct OUs</span>
+<span class="var">Move-ADObject</span> -Identity <span class="str">"CN=Neil Marvin Simon,CN=Users,DC=mylab,DC=local"</span> `
+  -TargetPath <span class="str">"OU=VMUsers,DC=mylab,DC=local"</span>
+
+<span class="var">Move-ADObject</span> -Identity <span class="str">"CN=CPC-NSimon-001,CN=Computers,DC=mylab,DC=local"</span> `
+  -TargetPath <span class="str">"OU=VirtualWorkstation,DC=mylab,DC=local"</span></pre>
+  </div>
+</section>
+</div>
+
+<hr class="divider"/>
+
+<!-- GPO OVERVIEW -->
+<section>
+  <div class="eyebrow">Policies</div>
+  <h2>GPOs Implemented</h2>
+  <div class="gpo-grid">
+
+    <div class="gpo-card">
+      <div class="gpo-card-header"><div class="gpo-num">1</div><span class="gpo-title">Password & Lockout Policy</span></div>
+      <div class="gpo-body">
+        <div class="gpo-target">📍 Applied to: nsimon (VMUsers)</div>
+        <div class="gpo-desc">Fine-grained password policy enforcing strong credentials and account lockout after failed attempts.</div>
+        <ul class="restriction-list">
+          <li><span class="r-active">✓</span> Min length: 10 characters</li>
+          <li><span class="r-active">✓</span> Complexity required</li>
+          <li><span class="r-active">✓</span> Lockout after 5 attempts</li>
+          <li><span class="r-active">✓</span> Lockout duration: 30 mins</li>
+          <li><span class="r-active">✓</span> Max age: 90 days</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="gpo-card">
+      <div class="gpo-card-header"><div class="gpo-num">2</div><span class="gpo-title">Login Banner</span></div>
+      <div class="gpo-body">
+        <div class="gpo-target">📍 Applied to: DC=mylab,DC=local (domain-wide)</div>
+        <div class="gpo-desc">Displays a legal warning message before any user can log in — standard in enterprise environments.</div>
+        <ul class="restriction-list">
+          <li><span class="r-active">✓</span> Title: AUTHORIZED ACCESS ONLY</li>
+          <li><span class="r-active">✓</span> Legal warning message displayed</li>
+          <li><span class="r-active">✓</span> Requires OK before login</li>
+          <li><span class="r-active">✓</span> Applied domain-wide</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="gpo-card">
+      <div class="gpo-card-header"><div class="gpo-num">3</div><span class="gpo-title">Desktop Restrictions</span></div>
+      <div class="gpo-body">
+        <div class="gpo-target">📍 Applied to: OU=VMUsers</div>
+        <div class="gpo-desc">Restricts desktop access for standard users, preventing them from changing system settings.</div>
+        <ul class="restriction-list">
+          <li><span class="r-blocked">✗</span> Control Panel blocked</li>
+          <li><span class="r-blocked">✗</span> Task Manager blocked</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="gpo-card">
+      <div class="gpo-card-header"><div class="gpo-num">4</div><span class="gpo-title">Software Restrictions</span></div>
+      <div class="gpo-body">
+        <div class="gpo-target">📍 Applied to: OU=VMUsers</div>
+        <div class="gpo-desc">Blocks access to sensitive system tools that standard users should not be able to use.</div>
+        <ul class="restriction-list">
+          <li><span class="r-blocked">✗</span> Registry Editor blocked</li>
+          <li><span class="r-blocked">✗</span> Run dialog blocked</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="gpo-card">
+      <div class="gpo-card-header"><div class="gpo-num">5</div><span class="gpo-title">Network Drive Mapping</span></div>
+      <div class="gpo-body">
+        <div class="gpo-target">📍 Applied to: OU=VMUsers</div>
+        <div class="gpo-desc">Automatically maps the company shared folder as a Z: drive when users log in.</div>
+        <ul class="restriction-list">
+          <li><span class="r-active">✓</span> Z: → \\192.168.1.200\CompanyShare</li>
+          <li><span class="r-active">✓</span> IT, Users, General folders</li>
+          <li><span class="r-active">✓</span> Domain Admins: Full Access</li>
+          <li><span class="r-active">✓</span> Domain Users: Read Access</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- STEP BY STEP -->
+<div class="stripe">
+<section>
+  <div class="eyebrow">Walkthrough</div>
+  <h2>Key Configurations</h2>
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">01</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Fine-Grained Password Policy</div>
+        <div class="step-desc">Unlike the Default Domain Policy, Fine-Grained Password Policies allow different password rules for different users or groups.</div>
+        <div class="code-block">
+          <div class="code-header"><span class="code-lang">PowerShell</span><div class="code-dots"><span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span></div></div>
+          <pre><span class="var">New-ADFineGrainedPasswordPolicy</span> `
+  -Name <span class="str">"VMUsers-Password-Policy"</span> `
+  -Precedence <span class="val">10</span> `
+  -MinPasswordLength <span class="val">10</span> `
+  -ComplexityEnabled <span class="val">$true</span> `
+  -LockoutThreshold <span class="val">5</span> `
+  -LockoutDuration <span class="str">"00:30:00"</span> `
+  -MaxPasswordAge <span class="str">"90.00:00:00"</span>
+
+<span class="var">Add-ADFineGrainedPasswordPolicySubject</span> `
+  -Identity <span class="str">"VMUsers-Password-Policy"</span> `
+  -Subjects <span class="str">"nsimon"</span></pre>
+        </div>
+        <div class="result-box">
+          <div class="result-label">✓ Verified</div>
+          AppliesTo: CN=Neil Marvin Simon,OU=VMUsers,DC=mylab,DC=local<br/>
+          ComplexityEnabled: True | LockoutThreshold: 5 | MinPasswordLength: 10
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">02</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Login Banner GPO</div>
+        <div class="step-desc">Applied domain-wide so every user sees the warning before logging in — verified working on the Windows 10 client.</div>
+        <div class="code-block">
+          <div class="code-header"><span class="code-lang">PowerShell</span><div class="code-dots"><span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span></div></div>
+          <pre><span class="var">Set-GPRegistryValue</span> -Name <span class="str">"Security Policy - Login Banner"</span> `
+  -Key <span class="str">"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"</span> `
+  -ValueName <span class="str">"legalnoticecaption"</span> `
+  -Type String -Value <span class="str">"AUTHORIZED ACCESS ONLY"</span>
+
+<span class="var">Set-GPRegistryValue</span> -Name <span class="str">"Security Policy - Login Banner"</span> `
+  -Key <span class="str">"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"</span> `
+  -ValueName <span class="str">"legalnoticetext"</span> `
+  -Type String -Value <span class="str">"This system is for authorized users only..."</span></pre>
+        </div>
+        <div class="result-box">
+          <div class="result-label">✓ Result on Win10 Client</div>
+          Login banner displayed: "AUTHORIZED ACCESS ONLY"<br/>
+          Message visible before credentials entered ✅
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">03</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Network Drive Mapping (CompanyShare)</div>
+        <div class="step-desc">Created a shared folder on WinServer2022 and mapped it as Z: drive on the Windows 10 client for domain users.</div>
+        <div class="code-block">
+          <div class="code-header"><span class="code-lang">PowerShell — Create Share</span><div class="code-dots"><span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span></div></div>
+          <pre><span class="cm"># Create folder structure</span>
+<span class="var">New-Item</span> -Path <span class="str">"C:\CompanyShare\IT"</span> -ItemType Directory
+<span class="var">New-Item</span> -Path <span class="str">"C:\CompanyShare\Users"</span> -ItemType Directory
+<span class="var">New-Item</span> -Path <span class="str">"C:\CompanyShare\General"</span> -ItemType Directory
+
+<span class="cm"># Share with permissions</span>
+<span class="var">New-SmbShare</span> -Name <span class="str">"CompanyShare"</span> -Path <span class="str">"C:\CompanyShare"</span>
+<span class="var">Grant-SmbShareAccess</span> -Name <span class="str">"CompanyShare"</span> `
+  -AccountName <span class="str">"Domain Admins"</span> -AccessRight Full -Force
+<span class="var">Grant-SmbShareAccess</span> -Name <span class="str">"CompanyShare"</span> `
+  -AccountName <span class="str">"Domain Users"</span> -AccessRight Read -Force
+
+<span class="cm"># Manual mapping on client</span>
+net use Z: \\<span class="val">192.168.1.200</span>\CompanyShare /persistent:yes</pre>
+        </div>
+        <div class="result-box">
+          <div class="result-label">✓ Result</div>
+          Z: drive mapped to \\192.168.1.200\CompanyShare<br/>
+          Folders visible: IT, Users, General ✅
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">04</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Temporary Privilege Elevation</div>
+        <div class="step-desc">When IT needs to fix something on a user's computer without logging them out — using "Run as different user" technique.</div>
+        <div class="code-block">
+          <div class="code-header"><span class="code-lang">CMD — Run as Admin while user is logged in</span><div class="code-dots"><span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span></div></div>
+          <pre><span class="cm"># Open Control Panel as Administrator while nsimon is logged in</span>
+runas /user:mylab\Administrator <span class="str">"control"</span>
+
+<span class="cm"># Or temporarily disable a GPO from the server</span>
+<span class="var">Set-GPLink</span> -Name <span class="str">"Desktop Policy - Restrictions"</span> `
+  -Target <span class="str">"OU=VMUsers,DC=mylab,DC=local"</span> `
+  -LinkEnabled No</pre>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+</div>
+
+<hr class="divider"/>
+
+<!-- ISSUES -->
+<section>
+  <div class="eyebrow">Troubleshooting</div>
+  <h2>Issues & Fixes</h2>
+  <div class="issues-grid">
+    <div class="issue-card">
+      <div class="issue-head"><div class="issue-dot"></div><span class="issue-title">DisableCMD persisted after removal</span></div>
+      <div class="issue-body">
+        <div class="issue-label">Cause</div>
+        <div class="issue-text">CMD was blocked by two GPOs simultaneously — removing it from one left it active from the other.</div>
+        <div class="fix-label">✓ Fix</div>
+        <div class="fix-text">Used Get-GPRegistryValue to identify which GPO had the active setting, then removed it from the correct policy.</div>
+      </div>
+    </div>
+    <div class="issue-card">
+      <div class="issue-head"><div class="issue-dot"></div><span class="issue-title">Invoke-GPUpdate Remote Timeout</span></div>
+      <div class="issue-body">
+        <div class="issue-label">Cause</div>
+        <div class="issue-text">Windows 10 firewall blocking Remote Scheduled Tasks Management port.</div>
+        <div class="fix-label">✓ Fix</div>
+        <div class="fix-text">Ran gpupdate /force directly on the Win10 client instead of using remote update from the server.</div>
+      </div>
+    </div>
+    <div class="issue-card">
+      <div class="issue-head"><div class="issue-dot"></div><span class="issue-title">Administrator Login Failure After OU Move</span></div>
+      <div class="issue-body">
+        <div class="issue-label">Cause</div>
+        <div class="issue-text">Password cache conflict after moving Administrator account to VMAdmin OU.</div>
+        <div class="fix-label">✓ Fix</div>
+        <div class="fix-text">Reset password using net user Administrator and re-enabled account with /active:yes.</div>
+      </div>
+    </div>
+    <div class="issue-card">
+      <div class="issue-head"><div class="issue-dot"></div><span class="issue-title">Z: Drive Not Auto-Mapping via GPO</span></div>
+      <div class="issue-body">
+        <div class="issue-label">Cause</div>
+        <div class="issue-text">Registry-based drive mapping method requires specific GPO preferences configuration.</div>
+        <div class="fix-label">✓ Fix</div>
+        <div class="fix-text">Used net use command as workaround with /persistent:yes to maintain mapping across reboots.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<!-- SKILLS -->
+<div class="stripe">
+<section>
+  <div class="eyebrow">Takeaways</div>
+  <h2>Skills Demonstrated</h2>
+  <div class="skills-wrap">
+    <div class="skill-pill"><span>🗂️</span> OU Management</div>
+    <div class="skill-pill"><span>🔒</span> GPO Creation & Linking</div>
+    <div class="skill-pill"><span>🔐</span> Fine-Grained Password Policy</div>
+    <div class="skill-pill"><span>🔔</span> Login Banner Deployment</div>
+    <div class="skill-pill"><span>🖥️</span> Desktop Restrictions</div>
+    <div class="skill-pill"><span>🚫</span> Software Restrictions</div>
+    <div class="skill-pill"><span>📁</span> SMB Share Configuration</div>
+    <div class="skill-pill"><span>💾</span> Network Drive Mapping</div>
+    <div class="skill-pill"><span>🔑</span> Privilege Elevation</div>
+    <div class="skill-pill"><span>💻</span> PowerShell Automation</div>
+    <div class="skill-pill"><span>🔍</span> GPO Troubleshooting</div>
+    <div class="skill-pill"><span>📋</span> IT Documentation</div>
+  </div>
+</section>
+</div>
+
+<hr class="divider"/>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-left">
+    Home Lab — Part 03 &nbsp;|&nbsp; <strong>GPO Implementation</strong> &nbsp;|&nbsp; Built by Neil Marvin Simon
+  </div>
+  <div class="footer-links">
+    <a href="#">Part 01 — DNS & DHCP →</a>
+    <a href="#">Part 02 — Win10 Client & AD →</a>
+  </div>
+</footer>
+
+</body>
+</html>
